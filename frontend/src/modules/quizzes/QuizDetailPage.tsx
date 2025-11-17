@@ -8,14 +8,17 @@ import {
   getQuiz,
   getQuizAnalytics,
   togglePublish,
-  type AssignQuizPayload
+  addQuestion,
+  type AssignQuizPayload,
+  type AddQuestionPayload
 } from '../../api/quizzes';
 import { Button } from '../../components/ui/Button';
 import { DataState } from '../../components/DataState';
 import { Input } from '../../components/ui/Input';
 import { useAuthStore, type AuthState } from '../../store/auth';
+
 import { getErrorMessage } from '../../utils/http';
-import type { Assignment, Attempt, QuizAnalytics, QuizDetail } from '../../types/quiz';
+import type { Assignment, Attempt, QuizAnalytics, QuizDetail, Question, QuestionType } from '../../types/quiz';
 import { formatDateTime, formatDurationSeconds, formatPercentage } from '../../utils/format';
 
 type Banner = { type: 'success' | 'error'; message: string } | null;
@@ -38,6 +41,27 @@ const initialAssignState: AssignFormState = {
   dueDate: ''
 };
 
+interface QuestionOptionInput {
+  optionText: string;
+  isCorrect: boolean;
+  feedback?: string | null;
+}
+
+interface AddQuestionState {
+
+    questionText: string;
+    points: string;
+    options: QuestionOptionInput[];
+}
+const initialAddQuestionState={
+  questionText:'',
+  points:'1',
+  options:[
+    {optionText:'',isCorrect:false},
+    {optionText:'',isCorrect:false}
+  ],
+};
+
 export const QuizDetailPage = () => {
   const quizId = useQuizId();
   const navigate = useNavigate();
@@ -45,7 +69,9 @@ export const QuizDetailPage = () => {
   const { user } = useAuthStore((state: AuthState) => ({ user: state.user }));
   const [banner, setBanner] = useState<Banner>(null);
   const [assignState, setAssignState] = useState<AssignFormState>(initialAssignState);
-  const [assignError, setAssignError] = useState<string | null>(null);
+  const [addQuestionState, setaddQuestionState] = useState<AddQuestionState>(initialAddQuestionState);
+  const [assignFormError, setAssignFormError] = useState<string | null>(null);
+  const [addQuestionError, setAddQuestionError] = useState<string | null>(null);
 
   const isTeacher = user?.role === 'teacher' || user?.role === 'admin';
   const isStudent = user?.role === 'student';
@@ -93,16 +119,26 @@ export const QuizDetailPage = () => {
       setBanner({ type: 'error', message: getErrorMessage(err, 'Unable to start attempt') });
     }
   });
-
+  const AddQuestionMutation=useMutation<Question,unknown, AddQuestionPayload>({
+    mutationFn: async(payload: AddQuestionPayload)=>addQuestion(quizId as number,payload),
+    onSuccess: () => {
+      setBanner({ type: 'success', message: 'Question added successfully.' });
+      setaddQuestionState(initialAddQuestionState);
+      setAddQuestionError(null);
+    },
+    onError: (err: unknown) => {
+      setAddQuestionError(getErrorMessage(err, 'Failed to add question'));
+    }
+  });
   const assignQuizMutation = useMutation<Assignment, unknown, AssignQuizPayload>({
     mutationFn: async (payload: AssignQuizPayload) => assignQuiz(quizId as number, payload),
     onSuccess: () => {
       setBanner({ type: 'success', message: 'Quiz assigned successfully.' });
       setAssignState(initialAssignState);
-      setAssignError(null);
+      setAssignFormError(null);
     },
     onError: (err: unknown) => {
-      setAssignError(getErrorMessage(err, 'Failed to assign quiz'));
+      setAssignFormError(getErrorMessage(err, 'Failed to assign quiz'));
     }
   });
 
@@ -111,13 +147,18 @@ export const QuizDetailPage = () => {
     setAssignState((prev: AssignFormState) => ({ ...prev, [name]: value }));
   };
 
+  // const handleaddQuestionSubmit=(event:FormEvent<HTMLFormElement>)=>{
+  //   event.preventDefault();    
+  //   };
+  // };
+
   const handleAssignSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const trimmedId = assignState.studentId.trim();
     const trimmedEmail = assignState.studentEmail.trim();
 
     if (!trimmedId && !trimmedEmail) {
-      setAssignError('Provide a student ID or email');
+      setAssignFormError('Provide a student ID or email');
       return;
     }
 
@@ -128,7 +169,7 @@ export const QuizDetailPage = () => {
     if (trimmedId) {
       const numericId = Number(trimmedId);
       if (!Number.isInteger(numericId) || numericId <= 0) {
-        setAssignError('Enter a valid student ID');
+        setAssignFormError('Enter a valid student ID');
         return;
       }
       payload.studentId = numericId;
@@ -137,6 +178,97 @@ export const QuizDetailPage = () => {
     }
 
     assignQuizMutation.mutate(payload);
+  };
+
+  // ... inside the QuizDetailPage component
+
+  // General handler for text/points inputs
+  const handleAddQuestionChange = (
+    event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
+  ) => {
+    const { name, value } = event.target;
+    setaddQuestionState((prev) => ({ ...prev, [name]: value }));
+  };
+
+  // Updates the text for a specific option
+  const handleOptionTextChange = (index: number, value: string) => {
+    setaddQuestionState((prev) => {
+      const newOptions = [...prev.options];
+      newOptions[index] = { ...newOptions[index], optionText: value };
+      return { ...prev, options: newOptions };
+    });
+  };
+
+  // Sets a specific option as the correct one (radio-button style)
+  const handleSetCorrectOption = (index: number) => {
+    setaddQuestionState((prev) => ({
+      ...prev,
+      options: prev.options.map((option, i) => ({
+        ...option,
+        isCorrect: i === index,
+      })),
+    }));
+  };
+
+  // Adds a new, empty option field
+  const handleAddOption = () => {
+    setaddQuestionState((prev) => ({
+      ...prev,
+      options: [...prev.options, { optionText: '', isCorrect: false }],
+    }));
+  };
+
+  // Removes an option by its index
+  const handleRemoveOption = (index: number) => {
+    setaddQuestionState((prev) => ({
+      ...prev,
+      options: prev.options.filter((_, i) => i !== index),
+    }));
+  };
+
+  // RE-ENABLE and IMPLEMENT the submit handler
+  const handleAddQuestionSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    const points = Number(addQuestionState.points);
+
+    // --- Basic Validation ---
+    if (!addQuestionState.questionText.trim()) {
+      setAssignFormError('Question text cannot be empty.');
+      return;
+    }
+    if (Number.isNaN(points) || points <= 0) {
+      setAssignFormError('Points must be a positive number.');
+      return;
+    }
+    const validOptions = addQuestionState.options
+      .filter((opt) => opt.optionText.trim() !== '')
+      .map((opt) => ({
+        ...opt,
+        optionText: opt.optionText.trim(),
+        feedback: null, // Feedback not included in this form
+      }));
+
+    if (validOptions.length < 2) {
+      setAssignFormError('An MCQ must have at least two valid options.');
+      return;
+    }
+    if (!validOptions.some((opt) => opt.isCorrect)) {
+      setAssignFormError('You must select one correct answer.');
+      return;
+    }
+    // --- End Validation ---
+
+    // Construct the payload for the API
+    const payload: AddQuestionPayload = {
+      questionType: 'mcq', // Hard-coded as requested
+      questionText: addQuestionState.questionText.trim(),
+      points: points,
+      options: validOptions,
+      // difficulty and tags are omitted, assuming they are optional
+    };
+
+    AddQuestionMutation.mutate(payload);
   };
 
   const questionCount = useMemo(() => quizQuery.data?.questions.length ?? 0, [quizQuery.data]);
@@ -296,8 +428,79 @@ export const QuizDetailPage = () => {
                 </div>
               ))
             )}
-          </div>
-        </article>
+          {isTeacher ? (
+            <article className="rounded-2xl border border-slate-800/70 bg-slate-900/70 p-6 shadow-lg shadow-slate-950/30">
+              <h3 className="text-lg font-semibold text-white">Add New MCQ Question</h3>
+              <form className="mt-4 flex flex-col gap-4" onSubmit={handleAddQuestionSubmit}>
+                <Input
+                
+                  label="Question Text"
+                  name="questionText"
+                  value={addQuestionState.questionText}
+                  onChange={handleAddQuestionChange}
+                  placeholder="What is the capital of React?"
+                  required
+                />
+                <Input
+                  label="Points"
+                  name="points"
+                  type="number"
+                  min="1"
+                  value={addQuestionState.points}
+                  onChange={handleAddQuestionChange}
+                  placeholder="1"
+                  required
+                />
+
+                <div className="space-y-3">
+                  <label className="block text-sm font-medium text-slate-300">Options</label>
+                  {addQuestionState.options.map((option, index) => (
+                    <div key={index} className="flex items-center gap-3">
+                      <input
+                        type="radio"
+                        name="correctOption"
+                        className="h-4 w-4 shrink-0 cursor-pointer"
+                        checked={option.isCorrect}
+                        onChange={() => handleSetCorrectOption(index)}
+                      />
+                      <Input
+                        name={`option-${index}`}
+                        value={option.optionText}
+                        onChange={(e) => handleOptionTextChange(index, e.target.value)}
+                        placeholder={`Option ${index + 1}`}
+                       
+                      />
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        
+                        onClick={() => handleRemoveOption(index)}
+                        disabled={addQuestionState.options.length <= 2}
+                        aria-label="Remove option"
+                      >
+                        {/* You can use an X icon here */}X
+                      </Button>
+                    </div>
+                  ))}
+                  <Button type="button" variant="secondary" onClick={handleAddOption}>
+                    Add Another Option
+                  </Button>
+                </div>
+
+                {assignFormError ? (
+                  <p className="rounded-lg bg-rose-500/10 px-3 py-2 text-sm text-rose-200">
+                    {assignFormError}
+                  </p>
+                ) : null}
+
+                <Button type="submit" disabled={AddQuestionMutation.isPending}>
+                  {AddQuestionMutation.isPending ? 'Adding…' : 'Add Question'}
+                </Button>
+              </form>
+            </article>
+          ) : null}
+        </div>
+      </article> 
 
         <aside className="space-y-6">
           {isTeacher ? (
@@ -329,8 +532,8 @@ export const QuizDetailPage = () => {
                   value={assignState.dueDate}
                   onChange={handleAssignChange}
                 />
-                {assignError ? (
-                  <p className="rounded-lg bg-rose-500/10 px-3 py-2 text-sm text-rose-200">{assignError}</p>
+                {assignFormError ? (
+                  <p className="rounded-lg bg-rose-500/10 px-3 py-2 text-sm text-rose-200">{assignFormError}</p>
                 ) : null}
                 <Button type="submit" disabled={assignQuizMutation.isPending}>
                   {assignQuizMutation.isPending ? 'Assigning…' : 'Assign quiz'}
