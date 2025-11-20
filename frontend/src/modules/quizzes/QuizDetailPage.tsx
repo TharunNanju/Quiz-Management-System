@@ -4,18 +4,32 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { startAttempt } from '../../api/attempts';
 import {
+  addQuestion,
   assignQuiz,
+  deleteQuiz,
+  deleteQuizQuestion,
   getQuiz,
   getQuizAnalytics,
+  getQuizAttempts,
   togglePublish,
-  type AssignQuizPayload
+  type AssignQuizPayload,
+  type AddQuestionPayload
 } from '../../api/quizzes';
 import { Button } from '../../components/ui/Button';
 import { DataState } from '../../components/DataState';
 import { Input } from '../../components/ui/Input';
 import { useAuthStore, type AuthState } from '../../store/auth';
+
 import { getErrorMessage } from '../../utils/http';
-import type { Assignment, Attempt, QuizAnalytics, QuizDetail } from '../../types/quiz';
+import type {
+  Assignment,
+  Attempt,
+  QuizAnalytics,
+  QuizAttemptSummary,
+  QuizDetail,
+  Question,
+  QuestionType
+} from '../../types/quiz';
 import { formatDateTime, formatDurationSeconds, formatPercentage } from '../../utils/format';
 
 type Banner = { type: 'success' | 'error'; message: string } | null;
@@ -38,6 +52,27 @@ const initialAssignState: AssignFormState = {
   dueDate: ''
 };
 
+interface QuestionOptionInput {
+  optionText: string;
+  isCorrect: boolean;
+  feedback?: string | null;
+}
+
+interface AddQuestionState {
+
+    questionText: string;
+    points: string;
+    options: QuestionOptionInput[];
+}
+const initialAddQuestionState={
+  questionText:'',
+  points:'1',
+  options:[
+    {optionText:'',isCorrect:false},
+    {optionText:'',isCorrect:false}
+  ],
+};
+
 export const QuizDetailPage = () => {
   const quizId = useQuizId();
   const navigate = useNavigate();
@@ -45,7 +80,10 @@ export const QuizDetailPage = () => {
   const { user } = useAuthStore((state: AuthState) => ({ user: state.user }));
   const [banner, setBanner] = useState<Banner>(null);
   const [assignState, setAssignState] = useState<AssignFormState>(initialAssignState);
-  const [assignError, setAssignError] = useState<string | null>(null);
+  const [addQuestionState, setaddQuestionState] = useState<AddQuestionState>(initialAddQuestionState);
+  const [assignFormError, setAssignFormError] = useState<string | null>(null);
+  const [addQuestionError, setAddQuestionError] = useState<string | null>(null);
+  const [deletingQuestionId, setDeletingQuestionId] = useState<number | null>(null);
 
   const isTeacher = user?.role === 'teacher' || user?.role === 'admin';
   const isStudent = user?.role === 'student';
@@ -62,6 +100,13 @@ export const QuizDetailPage = () => {
     enabled: Boolean(quizId && isTeacher),
     queryFn: async () => getQuizAnalytics(quizId as number),
     staleTime: 1000 * 60 * 5
+  });
+
+  const attemptsQuery = useQuery<QuizAttemptSummary[]>({
+    queryKey: ['quiz', quizId, 'attempts'],
+    enabled: Boolean(quizId && isTeacher),
+    queryFn: async () => getQuizAttempts(quizId as number),
+    staleTime: 1000 * 60
   });
 
   const togglePublishMutation = useMutation<
@@ -93,16 +138,52 @@ export const QuizDetailPage = () => {
       setBanner({ type: 'error', message: getErrorMessage(err, 'Unable to start attempt') });
     }
   });
-
+  const AddQuestionMutation=useMutation<Question,unknown, AddQuestionPayload>({
+    mutationFn: async(payload: AddQuestionPayload)=>addQuestion(quizId as number,payload),
+    onSuccess: () => {
+      setBanner({ type: 'success', message: 'Question added successfully.' });
+      setaddQuestionState(initialAddQuestionState);
+      setAddQuestionError(null);
+    },
+    onError: (err: unknown) => {
+      setAddQuestionError(getErrorMessage(err, 'Failed to add question'));
+    }
+  });
   const assignQuizMutation = useMutation<Assignment, unknown, AssignQuizPayload>({
     mutationFn: async (payload: AssignQuizPayload) => assignQuiz(quizId as number, payload),
     onSuccess: () => {
       setBanner({ type: 'success', message: 'Quiz assigned successfully.' });
       setAssignState(initialAssignState);
-      setAssignError(null);
+      setAssignFormError(null);
     },
     onError: (err: unknown) => {
-      setAssignError(getErrorMessage(err, 'Failed to assign quiz'));
+      setAssignFormError(getErrorMessage(err, 'Failed to assign quiz'));
+    }
+  });
+
+  const deleteQuizMutation = useMutation<void, unknown, number>({
+    mutationFn: async (quizIdToDelete: number) => deleteQuiz(quizIdToDelete),
+    onSuccess: () => {
+      setBanner({ type: 'success', message: 'Quiz deleted successfully.' });
+      queryClient.invalidateQueries({ queryKey: ['quizzes'] });
+      navigate('/');
+    },
+    onError: (err: unknown) => {
+      setBanner({ type: 'error', message: getErrorMessage(err, 'Unable to delete quiz') });
+    }
+  });
+
+  const deleteQuestionMutation = useMutation<void, unknown, { quizId: number; questionId: number }>({
+    mutationFn: async (variables) => deleteQuizQuestion(variables.quizId, variables.questionId),
+    onSuccess: () => {
+      setBanner({ type: 'success', message: 'Question removed.' });
+      queryClient.invalidateQueries({ queryKey: ['quiz', quizId] });
+    },
+    onError: (err: unknown) => {
+      setBanner({ type: 'error', message: getErrorMessage(err, 'Unable to delete question') });
+    },
+    onSettled: () => {
+      setDeletingQuestionId(null);
     }
   });
 
@@ -111,13 +192,18 @@ export const QuizDetailPage = () => {
     setAssignState((prev: AssignFormState) => ({ ...prev, [name]: value }));
   };
 
+  // const handleaddQuestionSubmit=(event:FormEvent<HTMLFormElement>)=>{
+  //   event.preventDefault();    
+  //   };
+  // };
+
   const handleAssignSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const trimmedId = assignState.studentId.trim();
     const trimmedEmail = assignState.studentEmail.trim();
 
     if (!trimmedId && !trimmedEmail) {
-      setAssignError('Provide a student ID or email');
+      setAssignFormError('Provide a student ID or email');
       return;
     }
 
@@ -128,7 +214,7 @@ export const QuizDetailPage = () => {
     if (trimmedId) {
       const numericId = Number(trimmedId);
       if (!Number.isInteger(numericId) || numericId <= 0) {
-        setAssignError('Enter a valid student ID');
+        setAssignFormError('Enter a valid student ID');
         return;
       }
       payload.studentId = numericId;
@@ -139,7 +225,119 @@ export const QuizDetailPage = () => {
     assignQuizMutation.mutate(payload);
   };
 
+  const handleDeleteQuiz = () => {
+    if (!quizId) return;
+    if (!window.confirm('Delete this quiz and all associated attempts/questions?')) {
+      return;
+    }
+    deleteQuizMutation.mutate(quizId);
+  };
+
+  const handleDeleteQuestion = (questionId: number) => {
+    if (!quizId) return;
+    if (!window.confirm('Remove this question from the quiz?')) {
+      return;
+    }
+    setDeletingQuestionId(questionId);
+    deleteQuestionMutation.mutate({ quizId, questionId });
+  };
+
+  // ... inside the QuizDetailPage component
+
+  // General handler for text/points inputs
+  const handleAddQuestionChange = (
+    event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
+  ) => {
+    const { name, value } = event.target;
+    setaddQuestionState((prev) => ({ ...prev, [name]: value }));
+  };
+
+  // Updates the text for a specific option
+  const handleOptionTextChange = (index: number, value: string) => {
+    setaddQuestionState((prev) => {
+      const newOptions = [...prev.options];
+      newOptions[index] = { ...newOptions[index], optionText: value };
+      return { ...prev, options: newOptions };
+    });
+  };
+
+  // Sets a specific option as the correct one (radio-button style)
+  const handleSetCorrectOption = (index: number) => {
+    setaddQuestionState((prev) => ({
+      ...prev,
+      options: prev.options.map((option, i) => ({
+        ...option,
+        isCorrect: i === index,
+      })),
+    }));
+  };
+
+  // Adds a new, empty option field
+  const handleAddOption = () => {
+    setaddQuestionState((prev) => ({
+      ...prev,
+      options: [...prev.options, { optionText: '', isCorrect: false }],
+    }));
+  };
+
+  // Removes an option by its index
+  const handleRemoveOption = (index: number) => {
+    setaddQuestionState((prev) => ({
+      ...prev,
+      options: prev.options.filter((_, i) => i !== index),
+    }));
+  };
+
+  // RE-ENABLE and IMPLEMENT the submit handler
+  const handleAddQuestionSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    const points = Number(addQuestionState.points);
+
+    // --- Basic Validation ---
+    if (!addQuestionState.questionText.trim()) {
+      setAddQuestionError('Question text cannot be empty.');
+      return;
+    }
+    if (Number.isNaN(points) || points <= 0) {
+      setAddQuestionError('Points must be a positive number.');
+      return;
+    }
+    const validOptions = addQuestionState.options
+      .filter((opt) => opt.optionText.trim() !== '')
+      .map((opt) => ({
+        ...opt,
+        optionText: opt.optionText.trim(),
+        feedback: null, // Feedback not included in this form
+      }));
+
+    if (validOptions.length < 2) {
+      setAddQuestionError('An MCQ must have at least two valid options.');
+      return;
+    }
+    if (!validOptions.some((opt) => opt.isCorrect)) {
+      setAddQuestionError('You must select one correct answer.');
+      return;
+    }
+    // --- End Validation ---
+
+    // Construct the payload for the API
+    const payload: AddQuestionPayload = {
+      questionType: 'mcq', // Hard-coded as requested
+      questionText: addQuestionState.questionText.trim(),
+      points: points,
+      options: validOptions,
+      // difficulty and tags are omitted, assuming they are optional
+    };
+
+    AddQuestionMutation.mutate(payload);
+  };
+
   const questionCount = useMemo(() => quizQuery.data?.questions.length ?? 0, [quizQuery.data]);
+  const totalPointsPossible = useMemo(
+    () => quizQuery.data?.questions.reduce((sum, question) => sum + question.points, 0) ?? 0,
+    [quizQuery.data]
+  );
 
   if (quizId === null) {
     return <DataState title="Invalid quiz" description="The requested quiz could not be found." />;
@@ -163,6 +361,8 @@ export const QuizDetailPage = () => {
   if (!quiz) {
     return <DataState title="Quiz not found" description="This quiz may have been removed." />;
   }
+
+  const hasQuestions = quiz.questions.length > 0;
 
   return (
     <div className="space-y-6">
@@ -193,13 +393,26 @@ export const QuizDetailPage = () => {
               {togglePublishMutation.isPending ? 'Updating…' : quiz.published ? 'Unpublish' : 'Publish now'}
             </Button>
           ) : null}
+          {isTeacher ? (
+            <Button
+              variant="danger"
+              onClick={handleDeleteQuiz}
+              disabled={deleteQuizMutation.isPending}
+            >
+              {deleteQuizMutation.isPending ? 'Deleting…' : 'Delete quiz'}
+            </Button>
+          ) : null}
           {isStudent ? (
             <Button
               variant="primary"
               onClick={() => startAttemptMutation.mutate()}
-              disabled={startAttemptMutation.isPending}
+              disabled={startAttemptMutation.isPending || !hasQuestions}
             >
-              {startAttemptMutation.isPending ? 'Preparing attempt…' : 'Start attempt'}
+              {startAttemptMutation.isPending
+                ? 'Preparing attempt…'
+                : hasQuestions
+                  ? 'Start attempt'
+                  : 'No questions yet'}
             </Button>
           ) : null}
         </div>
@@ -249,7 +462,11 @@ export const QuizDetailPage = () => {
             {quiz.questions.length === 0 ? (
               <DataState title="No questions yet" description="Add questions to bring this quiz to life." />
             ) : (
-              quiz.questions.map((question, index) => (
+              quiz.questions.map((question, index) => {
+                const isDeletingQuestion =
+                  deleteQuestionMutation.isPending && deletingQuestionId === question.questionId;
+
+                return (
                 <div
                   key={question.questionId}
                   className="rounded-2xl border border-slate-800/70 bg-slate-900/70 p-6 shadow-lg shadow-slate-950/30"
@@ -264,6 +481,17 @@ export const QuizDetailPage = () => {
                         {question.questionType}
                       </span>
                       <span className="rounded-full bg-slate-800/80 px-3 py-1">{question.points} pts</span>
+                      {isTeacher ? (
+                        <Button
+                          type="button"
+                          variant="danger"
+                          size="sm"
+                          onClick={() => handleDeleteQuestion(question.questionId)}
+                          disabled={isDeletingQuestion}
+                        >
+                          {isDeletingQuestion ? 'Removing…' : 'Delete'}
+                        </Button>
+                      ) : null}
                     </div>
                   </div>
 
@@ -294,10 +522,82 @@ export const QuizDetailPage = () => {
                     </p>
                   )}
                 </div>
-              ))
+                );
+              })
             )}
-          </div>
-        </article>
+          {isTeacher ? (
+            <article className="rounded-2xl border border-slate-800/70 bg-slate-900/70 p-6 shadow-lg shadow-slate-950/30">
+              <h3 className="text-lg font-semibold text-white">Add New MCQ Question</h3>
+              <form className="mt-4 flex flex-col gap-4" onSubmit={handleAddQuestionSubmit}>
+                <Input
+                
+                  label="Question Text"
+                  name="questionText"
+                  value={addQuestionState.questionText}
+                  onChange={handleAddQuestionChange}
+                  placeholder="What is the capital of React?"
+                  required
+                />
+                <Input
+                  label="Points"
+                  name="points"
+                  type="number"
+                  min="1"
+                  value={addQuestionState.points}
+                  onChange={handleAddQuestionChange}
+                  placeholder="1"
+                  required
+                />
+
+                <div className="space-y-3">
+                  <label className="block text-sm font-medium text-slate-300">Options</label>
+                  {addQuestionState.options.map((option, index) => (
+                    <div key={index} className="flex items-center gap-3">
+                      <input
+                        type="radio"
+                        name="correctOption"
+                        className="h-4 w-4 shrink-0 cursor-pointer"
+                        checked={option.isCorrect}
+                        onChange={() => handleSetCorrectOption(index)}
+                      />
+                      <Input
+                        name={`option-${index}`}
+                        value={option.optionText}
+                        onChange={(e) => handleOptionTextChange(index, e.target.value)}
+                        placeholder={`Option ${index + 1}`}
+                       
+                      />
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        
+                        onClick={() => handleRemoveOption(index)}
+                        disabled={addQuestionState.options.length <= 2}
+                        aria-label="Remove option"
+                      >
+                        {/* You can use an X icon here */}X
+                      </Button>
+                    </div>
+                  ))}
+                  <Button type="button" variant="secondary" onClick={handleAddOption}>
+                    Add Another Option
+                  </Button>
+                </div>
+
+                {addQuestionError ? (
+                  <p className="rounded-lg bg-rose-500/10 px-3 py-2 text-sm text-rose-200">
+                    {addQuestionError}
+                  </p>
+                ) : null}
+
+                <Button type="submit" disabled={AddQuestionMutation.isPending}>
+                  {AddQuestionMutation.isPending ? 'Adding…' : 'Add Question'}
+                </Button>
+              </form>
+            </article>
+          ) : null}
+        </div>
+      </article> 
 
         <aside className="space-y-6">
           {isTeacher ? (
@@ -329,8 +629,8 @@ export const QuizDetailPage = () => {
                   value={assignState.dueDate}
                   onChange={handleAssignChange}
                 />
-                {assignError ? (
-                  <p className="rounded-lg bg-rose-500/10 px-3 py-2 text-sm text-rose-200">{assignError}</p>
+                {assignFormError ? (
+                  <p className="rounded-lg bg-rose-500/10 px-3 py-2 text-sm text-rose-200">{assignFormError}</p>
                 ) : null}
                 <Button type="submit" disabled={assignQuizMutation.isPending}>
                   {assignQuizMutation.isPending ? 'Assigning…' : 'Assign quiz'}
@@ -374,6 +674,102 @@ export const QuizDetailPage = () => {
           ) : null}
         </aside>
       </section>
+
+      {isTeacher ? (
+        <section className="space-y-4 rounded-2xl border border-slate-800/70 bg-slate-900/70 p-6">
+          <header className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-semibold text-white">Student attempts</h2>
+              <p className="text-xs text-slate-400">Scores update automatically once learners submit.</p>
+            </div>
+            <p className="text-xs text-slate-400">
+              Max points:{' '}
+              <span className="font-semibold text-white">{totalPointsPossible}</span>
+            </p>
+          </header>
+
+          {attemptsQuery.isLoading ? (
+            <DataState title="Loading attempts" description="Fetching submissions and scores." />
+          ) : attemptsQuery.isError ? (
+            <p className="text-sm text-rose-300">
+              {getErrorMessage(attemptsQuery.error, 'Unable to load attempts right now.')}
+            </p>
+          ) : attemptsQuery.data && attemptsQuery.data.length > 0 ? (
+            <div className="overflow-x-auto">
+              <table className="min-w-full text-left text-sm text-slate-300">
+                <thead>
+                  <tr className="text-xs uppercase tracking-wide text-slate-500">
+                    <th className="px-3 py-2 font-medium">Student</th>
+                    <th className="px-3 py-2 font-medium">Started</th>
+                    <th className="px-3 py-2 font-medium">Completed</th>
+                    <th className="px-3 py-2 font-medium">Score</th>
+                    <th className="px-3 py-2 font-medium">Status</th>
+                    <th className="px-3 py-2 font-medium text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {attemptsQuery.data.map((attempt: QuizAttemptSummary) => {
+                    const statusClass =
+                      attempt.status === 'submitted' || attempt.status === 'graded'
+                        ? 'bg-emerald-500/10 text-emerald-200'
+                        : 'bg-amber-500/10 text-amber-200';
+                    const percentageLabel =
+                      attempt.score === null || totalPointsPossible === 0
+                        ? null
+                        : formatPercentage((attempt.score ?? 0) / totalPointsPossible);
+                    return (
+                      <tr key={attempt.attemptId} className="border-t border-slate-800/60">
+                        <td className="px-3 py-3">
+                          <p className="font-semibold text-white">{attempt.studentName}</p>
+                          <p className="text-xs text-slate-400">{attempt.studentEmail}</p>
+                        </td>
+                        <td className="px-3 py-3">{formatDateTime(attempt.startTime)}</td>
+                        <td className="px-3 py-3">
+                          {attempt.endTime ? formatDateTime(attempt.endTime) : 'In progress'}
+                        </td>
+                        <td className="px-3 py-3">
+                          {attempt.score === null ? (
+                            <span className="text-amber-200">Pending</span>
+                          ) : (
+                            <div className="flex flex-col">
+                              <span className="font-semibold text-white">
+                                {attempt.score} / {totalPointsPossible}
+                              </span>
+                              {percentageLabel ? (
+                                <span className="text-xs text-slate-400">{percentageLabel}</span>
+                              ) : null}
+                            </div>
+                          )}
+                        </td>
+                        <td className="px-3 py-3">
+                          <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${statusClass}`}>
+                            {attempt.status.replace('_', ' ')}
+                          </span>
+                        </td>
+                        <td className="px-3 py-3 text-right">
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => navigate(`/attempts/${attempt.attemptId}`)}
+                          >
+                            View
+                          </Button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <DataState
+              title="No attempts yet"
+              description="Scores will appear here once learners submit this quiz."
+            />
+          )}
+        </section>
+      ) : null}
     </div>
   );
 };

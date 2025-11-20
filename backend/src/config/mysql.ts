@@ -1,4 +1,4 @@
-import mysql, { Pool } from 'mysql2/promise';
+import { Pool, createPool } from 'mysql2/promise';
 
 import env from './env.js';
 import logger from './logger.js';
@@ -10,7 +10,7 @@ export const createDbPool = async (): Promise<Pool> => {
     return pool;
   }
 
-  pool = mysql.createPool({
+  pool = createPool({
     host: env.DB_HOST,
     port: env.DB_PORT,
     user: env.DB_USER,

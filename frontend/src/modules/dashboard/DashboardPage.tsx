@@ -3,7 +3,13 @@ import { useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { startAttempt } from '../../api/attempts';
-import { createQuiz, listQuizzes, togglePublish, type CreateQuizPayload } from '../../api/quizzes';
+import {
+  createQuiz,
+  deleteQuiz,
+  listQuizzes,
+  togglePublish,
+  type CreateQuizPayload
+} from '../../api/quizzes';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
 import { DataState } from '../../components/DataState';
@@ -36,6 +42,7 @@ export const DashboardPage = () => {
   const { user } = useAuthStore((state: AuthState) => ({ user: state.user }));
   const [banner, setBanner] = useState<Banner>(null);
   const [startingQuizId, setStartingQuizId] = useState<number | null>(null);
+  const [deletingQuizId, setDeletingQuizId] = useState<number | null>(null);
   const [formState, setFormState] = useState<CreateQuizFormState>(initialFormState);
   const [formError, setFormError] = useState<string | null>(null);
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
@@ -119,6 +126,20 @@ export const DashboardPage = () => {
     }
   });
 
+  const deleteQuizMutation = useMutation<void, unknown, number>({
+    mutationFn: async (quizId: number) => deleteQuiz(quizId),
+    onSuccess: () => {
+      setBanner({ type: 'success', message: 'Quiz deleted successfully.' });
+      queryClient.invalidateQueries({ queryKey: ['quizzes'] });
+    },
+    onError: (err: unknown) => {
+      setBanner({ type: 'error', message: getErrorMessage(err, 'Unable to delete quiz') });
+    },
+    onSettled: () => {
+      setDeletingQuizId(null);
+    }
+  });
+
   const handleFormChange = (
     event: ChangeEvent<HTMLInputElement> | ChangeEvent<HTMLTextAreaElement>
   ) => {
@@ -160,6 +181,14 @@ export const DashboardPage = () => {
     startAttemptMutation.mutate(quizId);
   };
 
+  const handleDeleteQuiz = (quizId: number) => {
+    if (!window.confirm('Delete this quiz? Assigned attempts and questions will be removed.')) {
+      return;
+    }
+    setDeletingQuizId(quizId);
+    deleteQuizMutation.mutate(quizId);
+  };
+
   const renderQuizCard = (quiz: Quiz) => {
     const actions: ReactNode[] = [];
 
@@ -179,6 +208,16 @@ export const DashboardPage = () => {
       actions.push(
         <Button key="view" variant="ghost" onClick={() => navigate(`/quizzes/${quiz.quizId}`)}>
           View details
+        </Button>
+      );
+      actions.push(
+        <Button
+          key="delete"
+          variant="danger"
+          onClick={() => handleDeleteQuiz(quiz.quizId)}
+          disabled={deleteQuizMutation.isPending && deletingQuizId === quiz.quizId}
+        >
+          {deleteQuizMutation.isPending && deletingQuizId === quiz.quizId ? 'Deleting…' : 'Delete'}
         </Button>
       );
     }

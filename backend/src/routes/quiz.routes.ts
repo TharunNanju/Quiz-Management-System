@@ -5,8 +5,11 @@ import {
   analytics,
   assign,
   createQuiz,
+  attempts,
   getQuiz,
   listQuizzes,
+  removeQuestion,
+  removeQuiz,
   togglePublish
 } from '../controllers/quiz.controller.js';
 import { requireAuth, requireRoles } from '../middleware/auth.js';
@@ -21,11 +24,18 @@ quizRouter
   .post(requireRoles(['teacher', 'admin']), asyncHandler(createQuiz))
   .get(asyncHandler(listQuizzes));
 
-quizRouter.route('/:quizId').get(asyncHandler(getQuiz));
+quizRouter
+  .route('/:quizId')
+  .get(asyncHandler(getQuiz))
+  .delete(requireRoles(['teacher', 'admin']), asyncHandler(removeQuiz));
 
 quizRouter
   .route('/:quizId/questions')
   .post(requireRoles(['teacher', 'admin']), asyncHandler(addQuestion));
+
+quizRouter
+  .route('/:quizId/questions/:questionId')
+  .delete(requireRoles(['teacher', 'admin']), asyncHandler(removeQuestion));
 
 quizRouter
   .route('/:quizId/publish')
@@ -38,3 +48,7 @@ quizRouter
 quizRouter
   .route('/:quizId/analytics')
   .get(requireRoles(['teacher', 'admin']), asyncHandler(analytics));
+
+quizRouter
+  .route('/:quizId/attempts')
+  .get(requireRoles(['teacher', 'admin']), asyncHandler(attempts));

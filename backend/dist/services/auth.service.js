@@ -1,14 +1,17 @@
 import bcrypt from 'bcryptjs';
-import { createUser, findByEmail, updateLastLogin } from '../repositories/user.repository.js';
+import { createUser, findByEmail, findById, updateLastLogin } from '../repositories/user.repository.js';
 import { generateAccessToken, generateRefreshToken, verifyRefreshToken as verifyRefreshTokenJwt } from '../utils/jwt.js';
-import { findById } from '../repositories/user.repository.js';
+const createHttpError = (message, statusCode) => {
+    const error = new Error(message);
+    error.statusCode = statusCode;
+    return error;
+};
 export const registerUser = async (payload, conn) => {
     const existing = await findByEmail(payload.email, conn);
     if (existing) {
-        const error = new Error('Email already registered');
-        error.statusCode = 409;
-        throw error;
+        throw createHttpError('Email already registered', 409);
     }
+    // eslint-disable-next-line import/no-named-as-default-member
     const passwordHash = await bcrypt.hash(payload.password, 10);
     const user = await createUser({
         name: payload.name,
@@ -22,15 +25,12 @@ export const registerUser = async (payload, conn) => {
 export const loginUser = async (email, password, conn) => {
     const user = await findByEmail(email, conn);
     if (!user) {
-        const error = new Error('Invalid credentials');
-        error.statusCode = 401;
-        throw error;
+        throw createHttpError('Invalid credentials', 401);
     }
+    // eslint-disable-next-line import/no-named-as-default-member
     const isValid = await bcrypt.compare(password, user.passwordHash);
     if (!isValid) {
-        const error = new Error('Invalid credentials');
-        error.statusCode = 401;
-        throw error;
+        throw createHttpError('Invalid credentials', 401);
     }
     await updateLastLogin(user.userId, conn);
     const tokens = issueTokens(user.userId, user.role);
@@ -51,19 +51,15 @@ export const verifyRefreshToken = (token) => {
             role: payload.role
         };
     }
-    catch (error) {
-        const err = new Error('Invalid refresh token');
-        err.statusCode = 401;
-        throw err;
+    catch {
+        throw createHttpError('Invalid refresh token', 401);
     }
 };
 export const issueTokensFromRefresh = async (token) => {
     const payload = verifyRefreshToken(token);
     const user = await findById(payload.userId);
     if (!user) {
-        const err = new Error('User not found');
-        err.statusCode = 404;
-        throw err;
+        throw createHttpError('User not found', 404);
     }
     const tokens = issueTokens(user.userId, user.role);
     return { user, tokens };

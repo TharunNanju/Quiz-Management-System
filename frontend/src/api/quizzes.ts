@@ -5,7 +5,8 @@ import type {
   QuizAnalytics,
   QuestionType,
   Assignment,
-  Question
+  Question,
+  QuizAttemptSummary
 } from '../types/quiz';
 
 export interface ListQuizParams {
@@ -77,4 +78,19 @@ export const assignQuiz = async (quizId: number, payload: AssignQuizPayload): Pr
 export const getQuizAnalytics = async (quizId: number): Promise<QuizAnalytics> => {
   const response = await api.get<ApiResponse<QuizAnalytics>>(`/quizzes/${quizId}/analytics`);
   return response.data.data;
+};
+
+export const getQuizAttempts = async (quizId: number): Promise<QuizAttemptSummary[]> => {
+  const response = await api.get<ApiResponse<QuizAttemptSummary[]>>(`/quizzes/${quizId}/attempts`);
+  return response.data.data;
+};
+
+export const deleteQuiz = async (quizId: number): Promise<void> => {
+  await api.delete<ApiResponse<{ quizId: number }>>(`/quizzes/${quizId}`);
+};
+
+export const deleteQuizQuestion = async (quizId: number, questionId: number): Promise<void> => {
+  await api.delete<ApiResponse<{ quizId: number; questionId: number }>>(
+    `/quizzes/${quizId}/questions/${questionId}`
+  );
 };

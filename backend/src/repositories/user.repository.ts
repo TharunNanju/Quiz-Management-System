@@ -1,4 +1,4 @@
-import type { PoolConnection } from 'mysql2/promise';
+import type { PoolConnection, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 
 import { getDbPool } from '../config/mysql.js';
 
@@ -14,7 +14,17 @@ export interface User {
   lastLogin: Date | null;
 }
 
-const mapUser = (row: any): User => ({
+interface UserRow extends RowDataPacket {
+  UserID: number;
+  Role: UserRole;
+  Name: string;
+  Email: string;
+  PasswordHash: string;
+  CreatedAt: Date;
+  LastLogin: Date | null;
+}
+
+const mapUser = (row: UserRow): User => ({
   userId: row.UserID,
   role: row.Role,
   name: row.Name,
@@ -29,13 +39,13 @@ export const createUser = async (
   conn?: PoolConnection
 ): Promise<User> => {
   const executor = conn ?? (await getDbPool().getConnection());
-  const [result] = await executor.execute(
+  const [result] = await executor.execute<ResultSetHeader>(
     `INSERT INTO Users (Role, Name, Email, PasswordHash)
      VALUES (?, ?, ?, ?)`,
     [data.role, data.name, data.email, data.passwordHash]
   );
 
-  const insertedId = (result as any).insertId as number;
+  const insertedId = result.insertId;
   if (!conn) {
     executor.release();
   }
@@ -44,7 +54,7 @@ export const createUser = async (
 
 export const findByEmail = async (email: string, conn?: PoolConnection): Promise<User | null> => {
   const executor = conn ?? (await getDbPool().getConnection());
-  const [rows] = await executor.execute(`SELECT * FROM Users WHERE Email = ? LIMIT 1`, [email]);
+  const [rows] = await executor.execute<UserRow[]>(`SELECT * FROM Users WHERE Email = ? LIMIT 1`, [email]);
 
   if (!conn) {
     executor.release();
@@ -56,7 +66,7 @@ export const findByEmail = async (email: string, conn?: PoolConnection): Promise
 
 export const findById = async (userId: number, conn?: PoolConnection): Promise<User | null> => {
   const executor = conn ?? (await getDbPool().getConnection());
-  const [rows] = await executor.execute(`SELECT * FROM Users WHERE UserID = ? LIMIT 1`, [userId]);
+  const [rows] = await executor.execute<UserRow[]>(`SELECT * FROM Users WHERE UserID = ? LIMIT 1`, [userId]);
 
   if (!conn) {
     executor.release();
@@ -66,7 +76,7 @@ export const findById = async (userId: number, conn?: PoolConnection): Promise<U
   return row ? mapUser(row) : null;
 };
 
-export const updateLastLogin = async (userId: number, conn?: PoolConnection) => {
+export const updateLastLogin = async (userId: number, conn?: PoolConnection): Promise<void> => {
   const executor = conn ?? (await getDbPool().getConnection());
   await executor.execute(`UPDATE Users SET LastLogin = CURRENT_TIMESTAMP WHERE UserID = ?`, [userId]);
   if (!conn) {

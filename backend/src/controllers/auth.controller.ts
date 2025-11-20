@@ -1,8 +1,8 @@
 import type { Request, Response } from 'express';
 
-import { loginSchema, registerSchema } from '../validators/auth.validator.js';
-import { issueTokensFromRefresh, loginUser, registerUser } from '../services/auth.service.js';
 import env from '../config/env.js';
+import { issueTokensFromRefresh, loginUser, registerUser } from '../services/auth.service.js';
+import { loginSchema, registerSchema } from '../validators/auth.validator.js';
 
 export const register = async (req: Request, res: Response) => {
   const payload = registerSchema.parse(req.body);

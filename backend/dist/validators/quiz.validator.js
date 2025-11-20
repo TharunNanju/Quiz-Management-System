@@ -21,20 +21,25 @@ export const addQuestionSchema = z.object({
         feedback: z.string().max(255).optional().nullable()
     }))
         .optional()
-        .refine((opts, ctx) => {
+        .superRefine((opts, ctx) => {
         if (!opts)
-            return true;
+            return;
         const hasCorrect = opts.some((opt) => opt.isCorrect);
         if (!hasCorrect) {
             ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'At least one option must be correct' });
         }
-        return hasCorrect;
     })
 });
 export const publishQuizSchema = z.object({
     published: z.boolean()
 });
-export const assignQuizSchema = z.object({
-    studentId: z.number().int().positive(),
+export const assignQuizSchema = z
+    .object({
+    studentId: z.number().int().positive().optional(),
+    studentEmail: z.string().email().optional(),
     dueDate: z.string().datetime().optional().nullable()
+})
+    .refine((data) => data.studentId !== undefined || data.studentEmail !== undefined, {
+    message: 'Provide either studentId or studentEmail',
+    path: ['studentId']
 });

@@ -93,7 +93,14 @@ The frontend becomes available on `http://localhost:5173` with automatic proxyin
 - When assigning a quiz, you can provide either the learner's numeric ID or their email address—use the seeded accounts above or any student records you create.
 - If you need a clean slate, run `npm run db:reset` in `backend/` to drop, recreate, migrate, and reseed the schema.
 
-### 5. Production builds and quality checks
+### 5. Managing quizzes and questions
+
+- Teachers and admins can delete an entire quiz (including its questions) from the Dashboard via the new **Delete quiz** button. The UI prompts for confirmation and disables the action while the request is in flight.
+- Individual questions can be removed directly from the quiz detail page. Each deletion also requires confirmation and automatically refreshes the quiz data once the backend responds.
+- The backend enforces ownership/role checks on `DELETE /api/v1/quizzes/:quizId` and `DELETE /api/v1/quizzes/:quizId/questions/:questionId`, ensuring only quiz owners or admins can perform destructive operations.
+- Students cannot start an attempt on a quiz with zero questions; the frontend now communicates this state and the validator accepts empty response arrays for future-proofed attempt creation.
+
+### 6. Production builds and quality checks
 
 - **Backend**
   - `npm run build`

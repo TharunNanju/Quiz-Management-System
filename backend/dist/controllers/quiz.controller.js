@@ -1,11 +1,16 @@
+import { addQuestionToQuiz, assignQuiz, createQuizForTeacher, deleteQuestionFromQuiz, deleteQuizForUser, getQuizAnalytics, getQuizDetail, listQuizAttempts, listQuizzesForUser, publishQuiz } from '../services/quiz.service.js';
 import { addQuestionSchema, assignQuizSchema, createQuizSchema, publishQuizSchema } from '../validators/quiz.validator.js';
-import { addQuestionToQuiz, assignQuiz, createQuizForTeacher, getQuizAnalytics, getQuizDetail, listQuizzesForUser, publishQuiz } from '../services/quiz.service.js';
 export const createQuiz = async (req, res) => {
     const payload = createQuizSchema.parse({
         ...req.body,
         timeLimit: Number(req.body.timeLimit)
     });
-    const quiz = await createQuizForTeacher(req.user.id, payload);
+    const normalizedPayload = {
+        ...payload,
+        startTime: payload.startTime ? new Date(payload.startTime) : null,
+        endTime: payload.endTime ? new Date(payload.endTime) : null
+    };
+    const quiz = await createQuizForTeacher(req.user.id, normalizedPayload);
     res.status(201).json({ status: 'success', data: quiz });
 };
 export const listQuizzes = async (req, res) => {
@@ -42,15 +47,37 @@ export const togglePublish = async (req, res) => {
 };
 export const assign = async (req, res) => {
     const quizId = Number(req.params.quizId || req.params.id);
-    const payload = assignQuizSchema.parse({
-        studentId: Number(req.body.studentId),
+    const rawPayload = {
+        studentId: req.body.studentId !== undefined && req.body.studentId !== null && req.body.studentId !== ''
+            ? Number(req.body.studentId)
+            : undefined,
+        studentEmail: typeof req.body.studentEmail === 'string' && req.body.studentEmail.trim().length
+            ? req.body.studentEmail.trim()
+            : undefined,
         dueDate: req.body.dueDate ?? null
-    });
-    const assignment = await assignQuiz(quizId, payload.studentId, payload.dueDate ? new Date(payload.dueDate) : null);
+    };
+    const payload = assignQuizSchema.parse(rawPayload);
+    const assignment = await assignQuiz(quizId, { studentId: payload.studentId, studentEmail: payload.studentEmail }, payload.dueDate ? new Date(payload.dueDate) : null);
     res.status(201).json({ status: 'success', data: assignment });
 };
 export const analytics = async (req, res) => {
     const quizId = Number(req.params.quizId || req.params.id);
     const data = await getQuizAnalytics(quizId);
     res.json({ status: 'success', data });
+};
+export const attempts = async (req, res) => {
+    const quizId = Number(req.params.quizId || req.params.id);
+    const data = await listQuizAttempts(quizId, { id: req.user.id, role: req.user.role });
+    res.json({ status: 'success', data });
+};
+export const removeQuiz = async (req, res) => {
+    const quizId = Number(req.params.quizId || req.params.id);
+    await deleteQuizForUser(quizId, { id: req.user.id, role: req.user.role });
+    res.json({ status: 'success', data: { quizId } });
+};
+export const removeQuestion = async (req, res) => {
+    const quizId = Number(req.params.quizId || req.params.id);
+    const questionId = Number(req.params.questionId);
+    await deleteQuestionFromQuiz(quizId, questionId, { id: req.user.id, role: req.user.role });
+    res.json({ status: 'success', data: { quizId, questionId } });
 };

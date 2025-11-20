@@ -1,8 +1,8 @@
-import type { Request, Response } from 'express';
+import type { Response } from 'express';
 
-import { submitAttemptSchema } from '../validators/attempt.validator.js';
-import { getAttemptDetail, startAttempt, submitAttemptWithResponses } from '../services/attempt.service.js';
 import type { AuthenticatedRequest } from '../middleware/auth.js';
+import { getAttemptDetail, startAttempt, submitAttemptWithResponses } from '../services/attempt.service.js';
+import { submitAttemptSchema } from '../validators/attempt.validator.js';
 
 type AuthedRequest = AuthenticatedRequest;
 

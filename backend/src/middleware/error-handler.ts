@@ -12,8 +12,9 @@ export const errorHandler = (
   err: unknown,
   _: Request,
   res: Response,
-  __: NextFunction
+  _next: NextFunction
 ) => {
+  void _next;
   if (err instanceof ZodError) {
     const zodError = err as ZodError;
     const details = zodError.flatten();

@@ -72,6 +72,17 @@ export interface AttemptDetail {
   responses: ResponseRecord[];
 }
 
+export interface QuizAttemptSummary {
+  attemptId: number;
+  studentId: number;
+  studentName: string;
+  studentEmail: string;
+  startTime: string;
+  endTime: string | null;
+  status: Attempt['status'];
+  score: number | null;
+}
+
 export interface ResponseRecord {
   responseId: number;
   attemptId: number;
