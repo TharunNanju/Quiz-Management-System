@@ -1,14 +1,22 @@
 import bcrypt from 'bcryptjs';
+import type { PoolConnection } from 'mysql2/promise';
 
-import env from '../config/env.js';
-import { createUser, findByEmail, updateLastLogin, type UserRole } from '../repositories/user.repository.js';
+import { createUser, findByEmail, findById, updateLastLogin, type UserRole } from '../repositories/user.repository.js';
 import {
   generateAccessToken,
   generateRefreshToken,
   verifyRefreshToken as verifyRefreshTokenJwt
 } from '../utils/jwt.js';
-import { findById } from '../repositories/user.repository.js';
-import type { PoolConnection } from 'mysql2/promise';
+
+interface HttpError extends Error {
+  statusCode?: number;
+}
+
+const createHttpError = (message: string, statusCode: number): HttpError => {
+  const error = new Error(message) as HttpError;
+  error.statusCode = statusCode;
+  return error;
+};
 
 export interface AuthTokens {
   accessToken: string;
@@ -28,11 +36,10 @@ export const registerUser = async (
 ) => {
   const existing = await findByEmail(payload.email, conn);
   if (existing) {
-    const error = new Error('Email already registered');
-    (error as any).statusCode = 409;
-    throw error;
+    throw createHttpError('Email already registered', 409);
   }
 
+  // eslint-disable-next-line import/no-named-as-default-member
   const passwordHash = await bcrypt.hash(payload.password, 10);
   const user = await createUser(
     {
@@ -55,16 +62,13 @@ export const loginUser = async (
 ) => {
   const user = await findByEmail(email, conn);
   if (!user) {
-    const error = new Error('Invalid credentials');
-    (error as any).statusCode = 401;
-    throw error;
+    throw createHttpError('Invalid credentials', 401);
   }
 
+  // eslint-disable-next-line import/no-named-as-default-member
   const isValid = await bcrypt.compare(password, user.passwordHash);
   if (!isValid) {
-    const error = new Error('Invalid credentials');
-    (error as any).statusCode = 401;
-    throw error;
+    throw createHttpError('Invalid credentials', 401);
   }
 
   await updateLastLogin(user.userId, conn);
@@ -87,10 +91,8 @@ export const verifyRefreshToken = (token: string) => {
       userId: payload.sub,
       role: payload.role
     };
-  } catch (error) {
-    const err = new Error('Invalid refresh token');
-    (err as any).statusCode = 401;
-    throw err;
+  } catch {
+    throw createHttpError('Invalid refresh token', 401);
   }
 };
 
@@ -98,9 +100,7 @@ export const issueTokensFromRefresh = async (token: string) => {
   const payload = verifyRefreshToken(token);
   const user = await findById(payload.userId);
   if (!user) {
-    const err = new Error('User not found');
-    (err as any).statusCode = 404;
-    throw err;
+    throw createHttpError('User not found', 404);
   }
   const tokens = issueTokens(user.userId, user.role);
   return { user, tokens };

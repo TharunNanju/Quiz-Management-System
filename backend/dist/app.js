@@ -1,16 +1,15 @@
 import 'dotenv/config';
 import cookieParser from 'cookie-parser';
 import cors from 'cors';
-import express from 'express';
+import express, { json, urlencoded } from 'express';
+import createRateLimit from 'express-rate-limit';
 import helmet from 'helmet';
-import rateLimit from 'express-rate-limit';
-import logger from './config/logger';
-import { requestLogger } from './middleware/request-logger';
 import { errorHandler } from './middleware/error-handler';
-import { authRouter } from './routes/auth.routes';
-import { quizRouter } from './routes/quiz.routes';
+import { requestLogger } from './middleware/request-logger';
 import { attemptRouter } from './routes/attempt.routes';
+import { authRouter } from './routes/auth.routes';
 import { healthRouter } from './routes/health.routes';
+import { quizRouter } from './routes/quiz.routes';
 const app = express();
 const corsOrigin = process.env.APP_URL || 'http://localhost:5173';
 app.use(cors({
@@ -18,11 +17,11 @@ app.use(cors({
     credentials: true
 }));
 app.use(helmet());
-app.use(express.json({ limit: '1mb' }));
-app.use(express.urlencoded({ extended: true }));
+app.use(json({ limit: '1mb' }));
+app.use(urlencoded({ extended: true }));
 app.use(cookieParser());
 app.use(requestLogger);
-const limiter = rateLimit({
+const limiter = createRateLimit({
     windowMs: 60 * 1000,
     max: 120,
     standardHeaders: true,
@@ -40,5 +39,4 @@ app.use((req, res) => {
     });
 });
 app.use(errorHandler);
-app.on('ready', () => logger.info('Express app ready'));
 export default app;

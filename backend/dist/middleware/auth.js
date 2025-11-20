@@ -1,14 +1,15 @@
-import { verifyAccessToken } from '../utils/jwt.js';
 import { findById } from '../repositories/user.repository.js';
-export const requireAuth = async (req, res, next) => {
+import { asyncHandler } from '../utils/async-handler.js';
+import { verifyAccessToken } from '../utils/jwt.js';
+const requireAuthHandler = async (req, res, next) => {
+    const authHeader = req.headers.authorization;
+    const token = authHeader?.startsWith('Bearer ')
+        ? authHeader.split(' ')[1]
+        : req.cookies?.accessToken;
+    if (!token) {
+        return res.status(401).json({ status: 'error', message: 'Authentication required' });
+    }
     try {
-        const authHeader = req.headers.authorization;
-        const token = authHeader?.startsWith('Bearer ')
-            ? authHeader.split(' ')[1]
-            : req.cookies?.accessToken;
-        if (!token) {
-            return res.status(401).json({ status: 'error', message: 'Authentication required' });
-        }
         const payload = verifyAccessToken(token);
         const user = await findById(payload.sub);
         if (!user) {
@@ -22,10 +23,11 @@ export const requireAuth = async (req, res, next) => {
         };
         return next();
     }
-    catch (error) {
+    catch {
         return res.status(401).json({ status: 'error', message: 'Invalid token' });
     }
 };
+export const requireAuth = asyncHandler(requireAuthHandler);
 export const requireRoles = (roles) => {
     return (req, res, next) => {
         if (!req.user || !roles.includes(req.user.role)) {

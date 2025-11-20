@@ -1,5 +1,5 @@
-import { submitAttemptSchema } from '../validators/attempt.validator.js';
 import { getAttemptDetail, startAttempt, submitAttemptWithResponses } from '../services/attempt.service.js';
+import { submitAttemptSchema } from '../validators/attempt.validator.js';
 export const createAttempt = async (req, res) => {
     const quizId = Number(req.params.quizId || req.body.quizId);
     const attempt = await startAttempt(req.user.id, quizId);

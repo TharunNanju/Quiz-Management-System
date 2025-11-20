@@ -1,6 +1,7 @@
 import { ZodError } from 'zod';
 import logger from '../config/logger.js';
-export const errorHandler = (err, _, res, __) => {
+export const errorHandler = (err, _, res, _next) => {
+    void _next;
     if (err instanceof ZodError) {
         const zodError = err;
         const details = zodError.flatten();

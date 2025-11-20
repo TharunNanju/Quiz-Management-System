@@ -4,11 +4,14 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { startAttempt } from '../../api/attempts';
 import {
+  addQuestion,
   assignQuiz,
+  deleteQuiz,
+  deleteQuizQuestion,
   getQuiz,
   getQuizAnalytics,
+  getQuizAttempts,
   togglePublish,
-  addQuestion,
   type AssignQuizPayload,
   type AddQuestionPayload
 } from '../../api/quizzes';
@@ -18,7 +21,15 @@ import { Input } from '../../components/ui/Input';
 import { useAuthStore, type AuthState } from '../../store/auth';
 
 import { getErrorMessage } from '../../utils/http';
-import type { Assignment, Attempt, QuizAnalytics, QuizDetail, Question, QuestionType } from '../../types/quiz';
+import type {
+  Assignment,
+  Attempt,
+  QuizAnalytics,
+  QuizAttemptSummary,
+  QuizDetail,
+  Question,
+  QuestionType
+} from '../../types/quiz';
 import { formatDateTime, formatDurationSeconds, formatPercentage } from '../../utils/format';
 
 type Banner = { type: 'success' | 'error'; message: string } | null;
@@ -72,6 +83,7 @@ export const QuizDetailPage = () => {
   const [addQuestionState, setaddQuestionState] = useState<AddQuestionState>(initialAddQuestionState);
   const [assignFormError, setAssignFormError] = useState<string | null>(null);
   const [addQuestionError, setAddQuestionError] = useState<string | null>(null);
+  const [deletingQuestionId, setDeletingQuestionId] = useState<number | null>(null);
 
   const isTeacher = user?.role === 'teacher' || user?.role === 'admin';
   const isStudent = user?.role === 'student';
@@ -88,6 +100,13 @@ export const QuizDetailPage = () => {
     enabled: Boolean(quizId && isTeacher),
     queryFn: async () => getQuizAnalytics(quizId as number),
     staleTime: 1000 * 60 * 5
+  });
+
+  const attemptsQuery = useQuery<QuizAttemptSummary[]>({
+    queryKey: ['quiz', quizId, 'attempts'],
+    enabled: Boolean(quizId && isTeacher),
+    queryFn: async () => getQuizAttempts(quizId as number),
+    staleTime: 1000 * 60
   });
 
   const togglePublishMutation = useMutation<
@@ -142,6 +161,32 @@ export const QuizDetailPage = () => {
     }
   });
 
+  const deleteQuizMutation = useMutation<void, unknown, number>({
+    mutationFn: async (quizIdToDelete: number) => deleteQuiz(quizIdToDelete),
+    onSuccess: () => {
+      setBanner({ type: 'success', message: 'Quiz deleted successfully.' });
+      queryClient.invalidateQueries({ queryKey: ['quizzes'] });
+      navigate('/');
+    },
+    onError: (err: unknown) => {
+      setBanner({ type: 'error', message: getErrorMessage(err, 'Unable to delete quiz') });
+    }
+  });
+
+  const deleteQuestionMutation = useMutation<void, unknown, { quizId: number; questionId: number }>({
+    mutationFn: async (variables) => deleteQuizQuestion(variables.quizId, variables.questionId),
+    onSuccess: () => {
+      setBanner({ type: 'success', message: 'Question removed.' });
+      queryClient.invalidateQueries({ queryKey: ['quiz', quizId] });
+    },
+    onError: (err: unknown) => {
+      setBanner({ type: 'error', message: getErrorMessage(err, 'Unable to delete question') });
+    },
+    onSettled: () => {
+      setDeletingQuestionId(null);
+    }
+  });
+
   const handleAssignChange = (event: ChangeEvent<HTMLInputElement>) => {
     const { name, value } = event.target;
     setAssignState((prev: AssignFormState) => ({ ...prev, [name]: value }));
@@ -178,6 +223,23 @@ export const QuizDetailPage = () => {
     }
 
     assignQuizMutation.mutate(payload);
+  };
+
+  const handleDeleteQuiz = () => {
+    if (!quizId) return;
+    if (!window.confirm('Delete this quiz and all associated attempts/questions?')) {
+      return;
+    }
+    deleteQuizMutation.mutate(quizId);
+  };
+
+  const handleDeleteQuestion = (questionId: number) => {
+    if (!quizId) return;
+    if (!window.confirm('Remove this question from the quiz?')) {
+      return;
+    }
+    setDeletingQuestionId(questionId);
+    deleteQuestionMutation.mutate({ quizId, questionId });
   };
 
   // ... inside the QuizDetailPage component
@@ -234,11 +296,11 @@ export const QuizDetailPage = () => {
 
     // --- Basic Validation ---
     if (!addQuestionState.questionText.trim()) {
-      setAssignFormError('Question text cannot be empty.');
+      setAddQuestionError('Question text cannot be empty.');
       return;
     }
     if (Number.isNaN(points) || points <= 0) {
-      setAssignFormError('Points must be a positive number.');
+      setAddQuestionError('Points must be a positive number.');
       return;
     }
     const validOptions = addQuestionState.options
@@ -250,11 +312,11 @@ export const QuizDetailPage = () => {
       }));
 
     if (validOptions.length < 2) {
-      setAssignFormError('An MCQ must have at least two valid options.');
+      setAddQuestionError('An MCQ must have at least two valid options.');
       return;
     }
     if (!validOptions.some((opt) => opt.isCorrect)) {
-      setAssignFormError('You must select one correct answer.');
+      setAddQuestionError('You must select one correct answer.');
       return;
     }
     // --- End Validation ---
@@ -272,6 +334,10 @@ export const QuizDetailPage = () => {
   };
 
   const questionCount = useMemo(() => quizQuery.data?.questions.length ?? 0, [quizQuery.data]);
+  const totalPointsPossible = useMemo(
+    () => quizQuery.data?.questions.reduce((sum, question) => sum + question.points, 0) ?? 0,
+    [quizQuery.data]
+  );
 
   if (quizId === null) {
     return <DataState title="Invalid quiz" description="The requested quiz could not be found." />;
@@ -295,6 +361,8 @@ export const QuizDetailPage = () => {
   if (!quiz) {
     return <DataState title="Quiz not found" description="This quiz may have been removed." />;
   }
+
+  const hasQuestions = quiz.questions.length > 0;
 
   return (
     <div className="space-y-6">
@@ -325,13 +393,26 @@ export const QuizDetailPage = () => {
               {togglePublishMutation.isPending ? 'Updating…' : quiz.published ? 'Unpublish' : 'Publish now'}
             </Button>
           ) : null}
+          {isTeacher ? (
+            <Button
+              variant="danger"
+              onClick={handleDeleteQuiz}
+              disabled={deleteQuizMutation.isPending}
+            >
+              {deleteQuizMutation.isPending ? 'Deleting…' : 'Delete quiz'}
+            </Button>
+          ) : null}
           {isStudent ? (
             <Button
               variant="primary"
               onClick={() => startAttemptMutation.mutate()}
-              disabled={startAttemptMutation.isPending}
+              disabled={startAttemptMutation.isPending || !hasQuestions}
             >
-              {startAttemptMutation.isPending ? 'Preparing attempt…' : 'Start attempt'}
+              {startAttemptMutation.isPending
+                ? 'Preparing attempt…'
+                : hasQuestions
+                  ? 'Start attempt'
+                  : 'No questions yet'}
             </Button>
           ) : null}
         </div>
@@ -381,7 +462,11 @@ export const QuizDetailPage = () => {
             {quiz.questions.length === 0 ? (
               <DataState title="No questions yet" description="Add questions to bring this quiz to life." />
             ) : (
-              quiz.questions.map((question, index) => (
+              quiz.questions.map((question, index) => {
+                const isDeletingQuestion =
+                  deleteQuestionMutation.isPending && deletingQuestionId === question.questionId;
+
+                return (
                 <div
                   key={question.questionId}
                   className="rounded-2xl border border-slate-800/70 bg-slate-900/70 p-6 shadow-lg shadow-slate-950/30"
@@ -396,6 +481,17 @@ export const QuizDetailPage = () => {
                         {question.questionType}
                       </span>
                       <span className="rounded-full bg-slate-800/80 px-3 py-1">{question.points} pts</span>
+                      {isTeacher ? (
+                        <Button
+                          type="button"
+                          variant="danger"
+                          size="sm"
+                          onClick={() => handleDeleteQuestion(question.questionId)}
+                          disabled={isDeletingQuestion}
+                        >
+                          {isDeletingQuestion ? 'Removing…' : 'Delete'}
+                        </Button>
+                      ) : null}
                     </div>
                   </div>
 
@@ -426,7 +522,8 @@ export const QuizDetailPage = () => {
                     </p>
                   )}
                 </div>
-              ))
+                );
+              })
             )}
           {isTeacher ? (
             <article className="rounded-2xl border border-slate-800/70 bg-slate-900/70 p-6 shadow-lg shadow-slate-950/30">
@@ -487,9 +584,9 @@ export const QuizDetailPage = () => {
                   </Button>
                 </div>
 
-                {assignFormError ? (
+                {addQuestionError ? (
                   <p className="rounded-lg bg-rose-500/10 px-3 py-2 text-sm text-rose-200">
-                    {assignFormError}
+                    {addQuestionError}
                   </p>
                 ) : null}
 
@@ -577,6 +674,102 @@ export const QuizDetailPage = () => {
           ) : null}
         </aside>
       </section>
+
+      {isTeacher ? (
+        <section className="space-y-4 rounded-2xl border border-slate-800/70 bg-slate-900/70 p-6">
+          <header className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-semibold text-white">Student attempts</h2>
+              <p className="text-xs text-slate-400">Scores update automatically once learners submit.</p>
+            </div>
+            <p className="text-xs text-slate-400">
+              Max points:{' '}
+              <span className="font-semibold text-white">{totalPointsPossible}</span>
+            </p>
+          </header>
+
+          {attemptsQuery.isLoading ? (
+            <DataState title="Loading attempts" description="Fetching submissions and scores." />
+          ) : attemptsQuery.isError ? (
+            <p className="text-sm text-rose-300">
+              {getErrorMessage(attemptsQuery.error, 'Unable to load attempts right now.')}
+            </p>
+          ) : attemptsQuery.data && attemptsQuery.data.length > 0 ? (
+            <div className="overflow-x-auto">
+              <table className="min-w-full text-left text-sm text-slate-300">
+                <thead>
+                  <tr className="text-xs uppercase tracking-wide text-slate-500">
+                    <th className="px-3 py-2 font-medium">Student</th>
+                    <th className="px-3 py-2 font-medium">Started</th>
+                    <th className="px-3 py-2 font-medium">Completed</th>
+                    <th className="px-3 py-2 font-medium">Score</th>
+                    <th className="px-3 py-2 font-medium">Status</th>
+                    <th className="px-3 py-2 font-medium text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {attemptsQuery.data.map((attempt: QuizAttemptSummary) => {
+                    const statusClass =
+                      attempt.status === 'submitted' || attempt.status === 'graded'
+                        ? 'bg-emerald-500/10 text-emerald-200'
+                        : 'bg-amber-500/10 text-amber-200';
+                    const percentageLabel =
+                      attempt.score === null || totalPointsPossible === 0
+                        ? null
+                        : formatPercentage((attempt.score ?? 0) / totalPointsPossible);
+                    return (
+                      <tr key={attempt.attemptId} className="border-t border-slate-800/60">
+                        <td className="px-3 py-3">
+                          <p className="font-semibold text-white">{attempt.studentName}</p>
+                          <p className="text-xs text-slate-400">{attempt.studentEmail}</p>
+                        </td>
+                        <td className="px-3 py-3">{formatDateTime(attempt.startTime)}</td>
+                        <td className="px-3 py-3">
+                          {attempt.endTime ? formatDateTime(attempt.endTime) : 'In progress'}
+                        </td>
+                        <td className="px-3 py-3">
+                          {attempt.score === null ? (
+                            <span className="text-amber-200">Pending</span>
+                          ) : (
+                            <div className="flex flex-col">
+                              <span className="font-semibold text-white">
+                                {attempt.score} / {totalPointsPossible}
+                              </span>
+                              {percentageLabel ? (
+                                <span className="text-xs text-slate-400">{percentageLabel}</span>
+                              ) : null}
+                            </div>
+                          )}
+                        </td>
+                        <td className="px-3 py-3">
+                          <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${statusClass}`}>
+                            {attempt.status.replace('_', ' ')}
+                          </span>
+                        </td>
+                        <td className="px-3 py-3 text-right">
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => navigate(`/attempts/${attempt.attemptId}`)}
+                          >
+                            View
+                          </Button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <DataState
+              title="No attempts yet"
+              description="Scores will appear here once learners submit this quiz."
+            />
+          )}
+        </section>
+      ) : null}
     </div>
   );
 };

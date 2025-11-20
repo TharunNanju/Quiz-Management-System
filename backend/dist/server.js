@@ -9,9 +9,8 @@ async function bootstrap() {
         const server = http.createServer(app);
         server.listen(port, () => {
             logger.info({ port }, 'Server listening');
-            app.emit('ready');
         });
-        const shutdown = async () => {
+        const shutdown = () => {
             logger.info('Shutting down server');
             server.close(() => {
                 logger.info('HTTP server closed');

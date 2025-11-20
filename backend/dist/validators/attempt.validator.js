@@ -6,5 +6,4 @@ export const submitAttemptSchema = z.object({
         selectedOptionId: z.number().int().positive().optional().nullable(),
         responseText: z.string().max(2000).optional().nullable()
     }))
-        .min(1)
 });

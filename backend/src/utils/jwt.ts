@@ -1,4 +1,4 @@
-import jwt from 'jsonwebtoken';
+import jwt, { type JwtPayload, type Secret, type SignOptions } from 'jsonwebtoken';
 
 import env from '../config/env.js';
 
@@ -7,20 +7,36 @@ interface TokenPayload {
   role: string;
 }
 
+const signToken = (
+  payload: TokenPayload,
+  secret: Secret,
+  expiresIn: SignOptions['expiresIn']
+) => jwt.sign(payload, secret, { expiresIn });
+
+const decodeToken = (token: string, secret: Secret): TokenPayload => {
+  const decoded = jwt.verify(token, secret);
+  if (typeof decoded === 'string') {
+    throw new Error('Invalid token payload');
+  }
+  const payload = decoded as JwtPayload;
+  const subject =
+    typeof payload.sub === 'string' ? Number(payload.sub) : payload.sub;
+  if (typeof subject !== 'number' || Number.isNaN(subject) || typeof payload.role !== 'string') {
+    throw new Error('Invalid token payload');
+  }
+  return { sub: subject, role: payload.role };
+};
+
 export const generateAccessToken = (payload: TokenPayload) =>
-  jwt.sign(payload, env.JWT_SECRET, {
-    expiresIn: env.JWT_ACCESS_EXPIRES_IN
-  });
+  signToken(payload, env.JWT_SECRET, env.JWT_ACCESS_EXPIRES_IN as SignOptions['expiresIn']);
 
 export const generateRefreshToken = (payload: TokenPayload) =>
-  jwt.sign(payload, env.JWT_REFRESH_SECRET, {
-    expiresIn: env.JWT_REFRESH_EXPIRES_IN
-  });
+  signToken(payload, env.JWT_REFRESH_SECRET, env.JWT_REFRESH_EXPIRES_IN as SignOptions['expiresIn']);
 
 export const verifyAccessToken = (token: string): TokenPayload => {
-  return jwt.verify(token, env.JWT_SECRET) as TokenPayload;
+  return decodeToken(token, env.JWT_SECRET);
 };
 
 export const verifyRefreshToken = (token: string): TokenPayload => {
-  return jwt.verify(token, env.JWT_REFRESH_SECRET) as TokenPayload;
+  return decodeToken(token, env.JWT_REFRESH_SECRET);
 };

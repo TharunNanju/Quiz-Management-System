@@ -1,5 +1,4 @@
 import { randomBytes } from 'node:crypto';
-
 import { z } from 'zod';
 
 const ensureSecret = (value: string | undefined, envKey: 'JWT_SECRET' | 'JWT_REFRESH_SECRET') => {

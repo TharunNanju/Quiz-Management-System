@@ -97,9 +97,7 @@ export const addQuestionWithOptions = async (input, conn) => {
     if (!conn) {
         executor.release();
     }
-    const [questionRows] = await getDbPool().execute(`SELECT * FROM Questions WHERE QuestionID = ?`, [
-        questionId
-    ]);
+    const [questionRows] = await getDbPool().execute(`SELECT * FROM Questions WHERE QuestionID = ?`, [questionId]);
     const row = Array.isArray(questionRows) ? questionRows[0] : undefined;
     if (!row) {
         throw new Error('Question insertion failed');
@@ -119,13 +117,16 @@ export const getQuizWithQuestions = async (quizId) => {
     const quiz = await getQuizById(quizId);
     if (!quiz)
         return null;
-    const [questionRows] = await pool.query(`SELECT * FROM Questions WHERE QuizID = ? ORDER BY QuestionID`, [
-        quizId
-    ]);
+    const [questionRows] = await pool.query(`SELECT * FROM Questions WHERE QuizID = ? ORDER BY QuestionID`, [quizId]);
     const questions = Array.isArray(questionRows) ? questionRows : [];
-    const [optionRows] = await pool.query(`SELECT * FROM Options WHERE QuestionID IN (?) ORDER BY OptionID`, [questions.map((q) => q.QuestionID)]);
+    let optionRows = [];
+    if (questions.length) {
+        const questionIds = questions.map((q) => q.QuestionID);
+        const [rows] = await pool.query(`SELECT * FROM Options WHERE QuestionID IN (?) ORDER BY OptionID`, [questionIds]);
+        optionRows = Array.isArray(rows) ? rows : [];
+    }
     const optionsByQuestion = new Map();
-    if (Array.isArray(optionRows)) {
+    if (optionRows.length) {
         for (const row of optionRows) {
             const option = {
                 optionId: row.OptionID,
@@ -150,6 +151,37 @@ export const getQuizWithQuestions = async (quizId) => {
         options: optionsByQuestion.get(row.QuestionID) ?? []
     }));
     return { ...quiz, questions: questionList };
+};
+const mapQuestionRow = (row) => ({
+    questionId: row.QuestionID,
+    quizId: row.QuizID,
+    questionType: row.QuestionType,
+    questionText: row.QuestionText,
+    points: row.Points,
+    difficulty: row.Difficulty ?? null,
+    tags: row.TagList ?? null
+});
+export const getQuestionById = async (questionId, conn) => {
+    const executor = conn ?? (await getDbPool().getConnection());
+    const [rows] = await executor.execute(`SELECT * FROM Questions WHERE QuestionID = ? LIMIT 1`, [questionId]);
+    if (!conn)
+        executor.release();
+    const row = Array.isArray(rows) ? rows[0] : undefined;
+    return row ? mapQuestionRow(row) : null;
+};
+export const deleteQuestionForQuiz = async (quizId, questionId, conn) => {
+    const executor = conn ?? (await getDbPool().getConnection());
+    const [result] = await executor.execute(`DELETE FROM Questions WHERE QuestionID = ? AND QuizID = ?`, [questionId, quizId]);
+    if (!conn)
+        executor.release();
+    return result.affectedRows > 0;
+};
+export const deleteQuizById = async (quizId, conn) => {
+    const executor = conn ?? (await getDbPool().getConnection());
+    const [result] = await executor.execute(`DELETE FROM Quizzes WHERE QuizID = ?`, [quizId]);
+    if (!conn)
+        executor.release();
+    return result.affectedRows > 0;
 };
 export const setQuizPublished = async (quizId, published, conn) => {
     const executor = conn ?? (await getDbPool().getConnection());

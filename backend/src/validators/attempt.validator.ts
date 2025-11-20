@@ -9,5 +9,4 @@ export const submitAttemptSchema = z.object({
         responseText: z.string().max(2000).optional().nullable()
       })
     )
-    .min(1)
 });

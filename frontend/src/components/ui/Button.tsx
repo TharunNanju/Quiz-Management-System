@@ -6,6 +6,7 @@ const baseStyles = 'inline-flex items-center justify-center rounded-lg font-semi
 const variants = {
   primary: 'bg-brand text-white hover:bg-brand/90 focus-visible:outline-brand',
   secondary: 'bg-slate-800 text-slate-100 hover:bg-slate-700 focus-visible:outline-slate-500',
+  danger: 'bg-rose-600 text-white hover:bg-rose-500 focus-visible:outline-rose-400',
   ghost: 'bg-transparent text-slate-200 hover:bg-slate-800 focus-visible:outline-slate-500'
 } as const;
 

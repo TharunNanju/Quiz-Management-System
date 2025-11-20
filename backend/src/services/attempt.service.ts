@@ -7,8 +7,8 @@ import {
   recordResponse,
   submitAttempt
 } from '../repositories/attempt.repository.js';
-import { withTransaction } from '../utils/db.js';
 import { getQuizWithQuestions } from '../repositories/quiz.repository.js';
+import { withTransaction } from '../utils/db.js';
 
 export const startAttempt = async (
   studentId: number,

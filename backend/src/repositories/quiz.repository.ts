@@ -1,4 +1,4 @@
-import type { PoolConnection } from 'mysql2/promise';
+import type { PoolConnection, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 
 import { getDbPool } from '../config/mysql.js';
 
@@ -35,7 +35,38 @@ export interface Option {
   feedback: string | null;
 }
 
-const mapQuiz = (row: any): Quiz => ({
+interface QuizRow extends RowDataPacket {
+  QuizID: number;
+  CreatorID: number;
+  Title: string;
+  Description: string | null;
+  Category: string | null;
+  TimeLimit: number;
+  StartTime: Date | null;
+  EndTime: Date | null;
+  Published: number;
+  CreatedAt: Date;
+}
+
+interface QuestionRow extends RowDataPacket {
+  QuestionID: number;
+  QuizID: number;
+  QuestionType: QuestionType;
+  QuestionText: string;
+  Points: number;
+  Difficulty: string | null;
+  TagList: string | null;
+}
+
+interface OptionRow extends RowDataPacket {
+  OptionID: number;
+  QuestionID: number;
+  OptionText: string;
+  IsCorrect: number;
+  Feedback: string | null;
+}
+
+const mapQuiz = (row: QuizRow): Quiz => ({
   quizId: row.QuizID,
   creatorId: row.CreatorID,
   title: row.Title,
@@ -54,7 +85,7 @@ export const createQuiz = async (
 ): Promise<Quiz> => {
   const executor = conn ?? (await getDbPool().getConnection());
 
-  const [result] = await executor.execute(
+  const [result] = await executor.execute<ResultSetHeader>(
     `INSERT INTO Quizzes (CreatorID, Title, Description, Category, TimeLimit, StartTime, EndTime, Published)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
       .replace(/\s+/g, ' '),
@@ -70,7 +101,7 @@ export const createQuiz = async (
     ]
   );
 
-  const quizId = (result as any).insertId as number;
+  const quizId = result.insertId;
   if (!conn) {
     executor.release();
   }
@@ -92,7 +123,7 @@ export const listQuizzes = async (filters: QuizListFilters = {}): Promise<Quiz[]
   const pool = getDbPool();
   let query = `SELECT DISTINCT q.* FROM Quizzes q`;
   const conditions: string[] = [];
-  const params: any[] = [];
+  const params: Array<number | string | boolean> = [];
 
   if (filters.assignedStudentId) {
     query += ' LEFT JOIN QuizAssignments qa ON qa.QuizID = q.QuizID';
@@ -121,8 +152,8 @@ export const listQuizzes = async (filters: QuizListFilters = {}): Promise<Quiz[]
 
   query += ' ORDER BY q.CreatedAt DESC';
 
-  const [rows] = await pool.query(query, params);
-  return Array.isArray(rows) ? (rows as any[]).map(mapQuiz) : [];
+  const [rows] = await pool.query<QuizRow[]>(query, params);
+  return Array.isArray(rows) ? rows.map(mapQuiz) : [];
 };
 
 export const getQuizById = async (
@@ -130,7 +161,10 @@ export const getQuizById = async (
   conn?: PoolConnection
 ): Promise<Quiz | null> => {
   const executor = conn ?? (await getDbPool().getConnection());
-  const [rows] = await executor.execute(`SELECT * FROM Quizzes WHERE QuizID = ? LIMIT 1`, [quizId]);
+  const [rows] = await executor.execute<QuizRow[]>(
+    `SELECT * FROM Quizzes WHERE QuizID = ? LIMIT 1`,
+    [quizId]
+  );
   if (!conn) {
     executor.release();
   }
@@ -154,7 +188,7 @@ export const addQuestionWithOptions = async (
 ): Promise<Question> => {
   const executor = conn ?? (await getDbPool().getConnection());
 
-  const [result] = await executor.execute(
+  const [result] = await executor.execute<ResultSetHeader>(
     `INSERT INTO Questions (QuizID, QuestionType, QuestionText, Points, Difficulty, TagList)
      VALUES (?, ?, ?, ?, ?, ?)`.replace(/\s+/g, ' '),
     [
@@ -167,7 +201,7 @@ export const addQuestionWithOptions = async (
     ]
   );
 
-  const questionId = (result as any).insertId as number;
+  const questionId = result.insertId;
 
   if (input.options?.length) {
     const values = input.options.map((option) => [
@@ -186,9 +220,10 @@ export const addQuestionWithOptions = async (
     executor.release();
   }
 
-  const [questionRows] = await getDbPool().execute(`SELECT * FROM Questions WHERE QuestionID = ?`, [
-    questionId
-  ]);
+  const [questionRows] = await getDbPool().execute<QuestionRow[]>(
+    `SELECT * FROM Questions WHERE QuestionID = ?`,
+    [questionId]
+  );
   const row = Array.isArray(questionRows) ? questionRows[0] : undefined;
   if (!row) {
     throw new Error('Question insertion failed');
@@ -218,20 +253,20 @@ export const getQuizWithQuestions = async (quizId: number): Promise<QuizDetail |
   const quiz = await getQuizById(quizId);
   if (!quiz) return null;
 
-  const [questionRows] = await pool.query(
+  const [questionRows] = await pool.query<QuestionRow[]>(
     `SELECT * FROM Questions WHERE QuizID = ? ORDER BY QuestionID`,
     [quizId]
   );
-  const questions = Array.isArray(questionRows) ? (questionRows as any[]) : [];
+  const questions = Array.isArray(questionRows) ? questionRows : [];
 
-  let optionRows: any[] = [];
+  let optionRows: OptionRow[] = [];
   if (questions.length) {
-    const questionIds = questions.map((q: any) => q.QuestionID);
-    const [rows] = await pool.query(
+    const questionIds = questions.map((q) => q.QuestionID);
+    const [rows] = await pool.query<OptionRow[]>(
       `SELECT * FROM Options WHERE QuestionID IN (?) ORDER BY OptionID`,
       [questionIds]
     );
-    optionRows = Array.isArray(rows) ? (rows as any[]) : [];
+    optionRows = Array.isArray(rows) ? rows : [];
   }
   const optionsByQuestion = new Map<number, Option[]>();
   if (optionRows.length) {
@@ -263,12 +298,60 @@ export const getQuizWithQuestions = async (quizId: number): Promise<QuizDetail |
   return { ...quiz, questions: questionList };
 };
 
+const mapQuestionRow = (row: QuestionRow): Question => ({
+  questionId: row.QuestionID,
+  quizId: row.QuizID,
+  questionType: row.QuestionType,
+  questionText: row.QuestionText,
+  points: row.Points,
+  difficulty: row.Difficulty ?? null,
+  tags: row.TagList ?? null
+});
+
+export const getQuestionById = async (
+  questionId: number,
+  conn?: PoolConnection
+): Promise<Question | null> => {
+  const executor = conn ?? (await getDbPool().getConnection());
+  const [rows] = await executor.execute<QuestionRow[]>(
+    `SELECT * FROM Questions WHERE QuestionID = ? LIMIT 1`,
+    [questionId]
+  );
+  if (!conn) executor.release();
+  const row = Array.isArray(rows) ? rows[0] : undefined;
+  return row ? mapQuestionRow(row) : null;
+};
+
+export const deleteQuestionForQuiz = async (
+  quizId: number,
+  questionId: number,
+  conn?: PoolConnection
+): Promise<boolean> => {
+  const executor = conn ?? (await getDbPool().getConnection());
+  const [result] = await executor.execute<ResultSetHeader>(
+    `DELETE FROM Questions WHERE QuestionID = ? AND QuizID = ?`,
+    [questionId, quizId]
+  );
+  if (!conn) executor.release();
+  return (result as ResultSetHeader).affectedRows > 0;
+};
+
+export const deleteQuizById = async (
+  quizId: number,
+  conn?: PoolConnection
+): Promise<boolean> => {
+  const executor = conn ?? (await getDbPool().getConnection());
+  const [result] = await executor.execute<ResultSetHeader>(`DELETE FROM Quizzes WHERE QuizID = ?`, [quizId]);
+  if (!conn) executor.release();
+  return (result as ResultSetHeader).affectedRows > 0;
+};
+
 export const setQuizPublished = async (
   quizId: number,
   published: boolean,
   conn?: PoolConnection
-) => {
+): Promise<void> => {
   const executor = conn ?? (await getDbPool().getConnection());
-  await executor.execute(`UPDATE Quizzes SET Published = ? WHERE QuizID = ?`, [published ? 1 : 0, quizId]);
+  await executor.execute<ResultSetHeader>(`UPDATE Quizzes SET Published = ? WHERE QuizID = ?`, [published ? 1 : 0, quizId]);
   if (!conn) executor.release();
 };
